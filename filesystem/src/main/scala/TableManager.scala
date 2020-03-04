@@ -1,6 +1,5 @@
-import akka.actor.typed.Behavior
+import akka.actor.typed.{Behavior, SupervisorStrategy}
 import akka.actor.typed.scaladsl.Behaviors
-import akka.io.Tcp.Message
 
 object TableManager {
 
@@ -10,7 +9,8 @@ object TableManager {
     def get(key: String) = this.data.get(key)
   }
 
-  def apply(): Behavior[FileSystemBackend.TableCommand] = handleCommand(Table())
+  def apply(): Behavior[FileSystemBackend.TableCommand] =
+    Behaviors.supervise(handleCommand(Table())).onFailure(SupervisorStrategy.restart)
 
   def handleCommand(table: Table): Behavior[FileSystemBackend.TableCommand] =
     Behaviors.receiveMessage {

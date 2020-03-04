@@ -1,9 +1,14 @@
-import akka.actor.typed.scaladsl.Behaviors
+import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
 import akka.actor.typed.{ActorRef, Behavior}
 
 object FileSystemBackend {
 
-  sealed trait StorageCommand
+  sealed trait StorageCommand {
+    def tableName: String
+    def replyTo: ActorRef[StorageResponse]
+  }
+
+  sealed trait TableCommand extends StorageCommand
 
   final case class CreateTable(tableName: String, replyTo: ActorRef[StorageResponse]) extends StorageCommand
 
@@ -11,13 +16,13 @@ object FileSystemBackend {
                            tableName: String,
                            key: String,
                            value: String, replyTo: ActorRef[StorageResponse]
-                         ) extends StorageCommand
+                         ) extends TableCommand
 
   final case class Select(
                            tableName: String,
                            key: String,
                            replyTo: ActorRef[StorageResponse]
-                         ) extends StorageCommand
+                         ) extends TableCommand
 
   sealed trait StorageResponse
 
@@ -37,55 +42,49 @@ object FileSystemBackend {
 
   final case class KeyError(tableName: String, key: String) extends StorageError
 
-  private case class Table(data: Map[String, String] = Map()) {
-    def +(entry: (String, String)) = this.copy(data = this.data + entry)
-
-    def get(key: String) = this.data.get(key)
-  }
-
   def apply(): Behavior[StorageCommand] = handleCommand(Map())
 
-  def handleCommand(database: Map[String, Table]): Behavior[StorageCommand] =
-    Behaviors.receiveMessage {
-      case message@CreateTable(_, _) => this.handleCreate(database, message)
-      case message@Insert(_, _, _, _) => this.handleInsert(database, message)
-      case message@Select(_, _, _) => this.handleSelect(database, message)
+  def handleCommand(database: Map[String, ActorRef[TableCommand]]): Behavior[StorageCommand] =
+    Behaviors.receive { (context, message) =>
+      message match {
+        case message@CreateTable(_, _) => this.handleCreate(database, context, message)
+        case message: TableCommand => this.handleTableCommand(database, message)
+      }
     }
 
-  def handleCreate(database: Map[String, Table], message: CreateTable): Behavior[StorageCommand] =
-    database.get(message.tableName).fold {
-      val newDatabase = database + (message.tableName -> Table())
-      message.replyTo ! TableCreated(message.tableName)
-      this.handleCommand(newDatabase)
-    } { _ =>
-      message.replyTo ! TableAlreadyExists(message.tableName)
-      Behaviors.same
-    }
+  def handleCreate(
+                    database: Map[String, ActorRef[TableCommand]],
+                    context: ActorContext[StorageCommand],
+                    message: CreateTable): Behavior[StorageCommand] =
+    database.get(message.tableName).fold(
+      this.createTable(database, context, message)
+    )(
+      _ => this.respondWithTableAlreadyExists(message)
+    )
 
-  def handleInsert(database: Map[String, Table], message: Insert): Behavior[StorageCommand] =
-    database.get(message.tableName).fold[Behavior[StorageCommand]] {
-      message.replyTo ! TableDoesNosExist(message.tableName)
-      Behaviors.same
-    } { table =>
-      val newTable = table + (message.key -> message.value)
-      val newDatabase = database.updated(message.tableName, newTable)
-      message.replyTo ! InsertSuccessful(message.tableName, message.key, message.value)
-      this.handleCommand(newDatabase)
-    }
+  def createTable(
+                   database: Map[String, ActorRef[TableCommand]],
+                   context: ActorContext[StorageCommand],
+                   message: CreateTable): Behavior[StorageCommand] = {
+    val tableManager = context.spawn(TableManager(), message.tableName)
+    val newDatabase = database + (message.tableName -> tableManager)
+    message.replyTo ! TableCreated(message.tableName)
+    this.handleCommand(newDatabase)
+  }
 
-  def handleSelect(database: Map[String, Table], message: Select): Behavior[StorageCommand] = {
-    database.get(message.tableName).fold {
-      message.replyTo ! TableDoesNosExist(message.tableName)
-    } {
-      table => this.getValueFromTable(table, message)
-    }
+  def respondWithTableAlreadyExists(message: CreateTable): Behavior[StorageCommand] = {
+    message.replyTo ! TableAlreadyExists(message.tableName)
     Behaviors.same
   }
 
-  def getValueFromTable(table: Table, message: Select) =
-    table.get(message.key).fold {
-      message.replyTo ! KeyError(message.tableName, message.key)
+  def handleTableCommand(database: Map[String, ActorRef[TableCommand]], message: TableCommand): Behavior[StorageCommand] = {
+    database.get(message.tableName).fold {
+      message.replyTo ! TableDoesNosExist(message.tableName)
     } {
-      value => message.replyTo ! SelectSuccessful(message.tableName, message.key, value)
+      tableManager => tableManager ! message
     }
+
+    Behaviors.same
+  }
+
 }

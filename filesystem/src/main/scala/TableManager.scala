@@ -16,6 +16,7 @@ object TableManager {
     Behaviors.receiveMessage {
       case message: FileSystemBackend.Insert => this.handleInsert(table, message)
       case message: FileSystemBackend.Select => this.handleSelect(table, message)
+      case message: FileSystemBackend.DeleteTable => this.handleDelete(message)
     }
 
   def handleInsert(table: Table, message: FileSystemBackend.Insert): Behavior[FileSystemBackend.TableCommand] = {
@@ -33,9 +34,14 @@ object TableManager {
     Behaviors.same
   }
 
-  def responseWithKeyError(message: FileSystemBackend.Select) =
+  def responseWithKeyError(message: FileSystemBackend.Select): Unit =
     message.replyTo ! FileSystemBackend.KeyError(message.tableName, message.key)
 
-  def respondWithValue(message: FileSystemBackend.Select, value: String) =
+  def respondWithValue(message: FileSystemBackend.Select, value: String): Unit =
     message.replyTo ! FileSystemBackend.SelectSuccessful(message.tableName, message.key, value)
+
+  def handleDelete(message: FileSystemBackend.DeleteTable): Behavior[FileSystemBackend.TableCommand] = {
+    message.replyTo ! FileSystemBackend.TableDeleted(message.tableName)
+    Behaviors.stopped
+  }
 }

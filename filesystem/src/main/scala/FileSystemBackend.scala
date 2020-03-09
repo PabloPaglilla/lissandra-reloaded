@@ -1,5 +1,6 @@
+import akka.actor.PoisonPill
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior}
+import akka.actor.typed.{ActorRef, Behavior, scaladsl}
 
 object FileSystemBackend {
 
@@ -24,6 +25,8 @@ object FileSystemBackend {
                            replyTo: ActorRef[StorageResponse]
                          ) extends TableCommand
 
+  final case class DeleteTable(tableName: String, replyTo: ActorRef[StorageResponse]) extends TableCommand
+
   sealed trait StorageResponse
 
   sealed trait StorageSuccess extends StorageResponse
@@ -36,6 +39,8 @@ object FileSystemBackend {
 
   final case class SelectSuccessful(tableName: String, key: String, value: String) extends StorageSuccess
 
+  final case class TableDeleted(tableName: String) extends StorageSuccess
+
   final case class TableAlreadyExists(tableName: String) extends StorageError
 
   final case class TableDoesNosExist(tableName: String) extends StorageError
@@ -47,7 +52,8 @@ object FileSystemBackend {
   def handleCommand(database: Map[String, ActorRef[TableCommand]]): Behavior[StorageCommand] =
     Behaviors.receive { (context, message) =>
       message match {
-        case message@CreateTable(_, _) => this.handleCreate(database, context, message)
+        case message: CreateTable => this.handleCreate(database, context, message)
+        case message: DeleteTable => this.handleDelete(database, message)
         case message: TableCommand => this.handleTableCommand(database, message)
       }
     }
@@ -69,6 +75,26 @@ object FileSystemBackend {
     val tableManager = context.spawn(TableManager(), message.tableName)
     val newDatabase = database + (message.tableName -> tableManager)
     message.replyTo ! TableCreated(message.tableName)
+    this.handleCommand(newDatabase)
+  }
+
+  def handleDelete(
+                  database: Map[String, ActorRef[TableCommand]],
+                  message: DeleteTable
+                  ): Behavior[StorageCommand] =
+    database.get(message.tableName).fold[Behavior[StorageCommand]] {
+      message.replyTo ! TableDoesNosExist(message.tableName)
+      Behaviors.same
+    } {
+      this.deleteTable(database, _, message)
+    }
+
+  def deleteTable(
+                   database: Map[String, ActorRef[TableCommand]],
+                   tableManager: ActorRef[TableCommand],
+                   message: DeleteTable): Behavior[StorageCommand] = {
+    val newDatabase = database - message.tableName
+    tableManager ! message
     this.handleCommand(newDatabase)
   }
 

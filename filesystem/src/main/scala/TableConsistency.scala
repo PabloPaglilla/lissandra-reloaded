@@ -1,0 +1,5 @@
+sealed trait TableConsistency
+
+case object StrongConsistency extends TableConsistency
+case object StrongHashConsistency extends TableConsistency
+case object EventualConsistency extends TableConsistency

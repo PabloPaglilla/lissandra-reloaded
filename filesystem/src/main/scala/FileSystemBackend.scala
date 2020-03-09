@@ -1,6 +1,5 @@
-import akka.actor.PoisonPill
 import akka.actor.typed.scaladsl.{ActorContext, Behaviors}
-import akka.actor.typed.{ActorRef, Behavior, scaladsl}
+import akka.actor.typed.{ActorRef, Behavior}
 
 object FileSystemBackend {
 
@@ -11,7 +10,11 @@ object FileSystemBackend {
 
   sealed trait TableCommand extends StorageCommand
 
-  final case class CreateTable(tableName: String, replyTo: ActorRef[StorageResponse]) extends StorageCommand
+  final case class CreateTable(
+                                tableName: String,
+                                consistency: TableConsistency,
+                                replyTo: ActorRef[StorageResponse]
+                              ) extends StorageCommand
 
   final case class Insert(
                            tableName: String,
@@ -27,6 +30,8 @@ object FileSystemBackend {
 
   final case class DeleteTable(tableName: String, replyTo: ActorRef[StorageResponse]) extends TableCommand
 
+  final case class GetConsistency(tableName: String, replyTo: ActorRef[StorageResponse]) extends TableCommand
+
   sealed trait StorageResponse
 
   sealed trait StorageSuccess extends StorageResponse
@@ -40,6 +45,8 @@ object FileSystemBackend {
   final case class SelectSuccessful(tableName: String, key: String, value: String) extends StorageSuccess
 
   final case class TableDeleted(tableName: String) extends StorageSuccess
+
+  final case class TableConsistencyResponse(tableName: String, consistency: TableConsistency) extends StorageSuccess
 
   final case class TableAlreadyExists(tableName: String) extends StorageError
 

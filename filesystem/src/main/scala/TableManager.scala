@@ -17,6 +17,10 @@ object TableManager {
       case message: FileSystemBackend.Insert => this.handleInsert(table, message)
       case message: FileSystemBackend.Select => this.handleSelect(table, message)
       case message: FileSystemBackend.DeleteTable => this.handleDelete(message)
+      case message: FileSystemBackend.GetConsistency => {
+        message.replyTo ! FileSystemBackend.TableConsistencyResponse(message.tableName, StrongConsistency)
+        Behaviors.same
+      }
     }
 
   def handleInsert(table: Table, message: FileSystemBackend.Insert): Behavior[FileSystemBackend.TableCommand] = {
